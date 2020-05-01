@@ -207,15 +207,15 @@ class ModelTrainer:
                 for group in optimizer.param_groups:
                     learning_rate = group["lr"]
 
-                if learning_rate != previous_learning_rate and batch_growth_annealing:
+                lr_has_changed = learning_rate != previous_learning_rate
+                if lr_has_changed and batch_growth_annealing:
                     mini_batch_size *= 2
 
                 self._reload_last_best_model_if_annealing_with_restarts_is_enabled(
                     anneal_with_prestarts,
                     anneal_with_restarts,
                     base_path,
-                    learning_rate,
-                    previous_learning_rate,
+                    lr_has_changed,
                 )
 
                 previous_learning_rate = learning_rate
@@ -515,17 +515,9 @@ class ModelTrainer:
         }
 
     def _reload_last_best_model_if_annealing_with_restarts_is_enabled(
-        self,
-        anneal_with_prestarts,
-        anneal_with_restarts,
-        base_path,
-        learning_rate,
-        previous_learning_rate,
+        self, anneal_with_prestarts, anneal_with_restarts, base_path, lr_has_changed,
     ):
-        if (
-            learning_rate != previous_learning_rate
-            and (base_path / "best-model.pt").exists()
-        ):
+        if lr_has_changed and (base_path / "best-model.pt").exists():
             log.info("resetting to best model")
             if anneal_with_restarts:
                 self.model.load_state_dict(
