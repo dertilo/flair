@@ -235,7 +235,7 @@ class ModelTrainer:
 
                 self.model.train()
 
-                train_loss = self._run_training(
+                train_loss = self._train_one_epoch(
                     batch_loader,
                     embeddings_storage_mode,
                     micro_batch_size,
@@ -461,7 +461,7 @@ class ModelTrainer:
             "dev_loss_history": dev_loss_history,
         }
 
-    def _run_training(
+    def _train_one_epoch(
         self,
         batch_loader,
         embeddings_storage_mode,
