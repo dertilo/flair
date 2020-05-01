@@ -172,9 +172,15 @@ class ModelTrainer:
         log.info(f"Device: {flair.device}")
         log_line(log)
         log.info(f"Embeddings storage mode: {embeddings_storage_mode}")
-        if isinstance(self.model, SequenceTagger) and self.model.weight_dict and self.model.use_crf:
+        if (
+            isinstance(self.model, SequenceTagger)
+            and self.model.weight_dict
+            and self.model.use_crf
+        ):
             log_line(log)
-            log.warning(f'WARNING: Specified class weights will not take effect when using CRF')
+            log.warning(
+                f"WARNING: Specified class weights will not take effect when using CRF"
+            )
 
         # determine what splits (train, dev, test) to evaluate and log
         log_train = True if monitor_train else False
@@ -286,9 +292,10 @@ class ModelTrainer:
                         )
                     if anneal_with_prestarts:
                         self.model.load_state_dict(
-                            self.model.load(base_path / "pre-best-model.pt").state_dict()
+                            self.model.load(
+                                base_path / "pre-best-model.pt"
+                            ).state_dict()
                         )
-
 
                 previous_learning_rate = learning_rate
 
@@ -535,7 +542,11 @@ class ModelTrainer:
 
                 # if we use dev data, remember best model based on dev evaluation score
                 if (
-                    (not train_with_dev or anneal_with_restarts or anneal_with_prestarts)
+                    (
+                        not train_with_dev
+                        or anneal_with_restarts
+                        or anneal_with_prestarts
+                    )
                     and not param_selection_mode
                     and current_score == scheduler.best
                 ):
