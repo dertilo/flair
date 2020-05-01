@@ -120,20 +120,6 @@ class ModelTrainer:
         :return:
         """
 
-        if self.use_tensorboard:
-            try:
-                from torch.utils.tensorboard import SummaryWriter
-
-                writer = SummaryWriter()
-            except:
-                log_line(log)
-                log.warning(
-                    "ATTENTION! PyTorch >= 1.1.0 and pillow are required for TensorBoard support!"
-                )
-                log_line(log)
-                self.use_tensorboard = False
-                pass
-
         if use_amp:
             if sys.version_info < (3, 0):
                 raise RuntimeError("Apex currently only supports Python 3. Aborting.")
@@ -150,78 +136,41 @@ class ModelTrainer:
         if type(base_path) is str:
             base_path = Path(base_path)
 
-        log_handler = add_file_handler(log, base_path / "training.log")
-
-        log_line(log)
-        log.info(f'Model: "{self.model}"')
-        log_line(log)
-        log.info(f'Corpus: "{self.corpus}"')
-        log_line(log)
-        log.info("Parameters:")
-        log.info(f' - learning_rate: "{learning_rate}"')
-        log.info(f' - mini_batch_size: "{mini_batch_size}"')
-        log.info(f' - patience: "{patience}"')
-        log.info(f' - anneal_factor: "{anneal_factor}"')
-        log.info(f' - max_epochs: "{max_epochs}"')
-        log.info(f' - shuffle: "{shuffle}"')
-        log.info(f' - train_with_dev: "{train_with_dev}"')
-        log.info(f' - batch_growth_annealing: "{batch_growth_annealing}"')
-        log_line(log)
-        log.info(f'Model training base path: "{base_path}"')
-        log_line(log)
-        log.info(f"Device: {flair.device}")
-        log_line(log)
-        log.info(f"Embeddings storage mode: {embeddings_storage_mode}")
-        if (
-            isinstance(self.model, SequenceTagger)
-            and self.model.weight_dict
-            and self.model.use_crf
-        ):
-            log_line(log)
-            log.warning(
-                f"WARNING: Specified class weights will not take effect when using CRF"
-            )
-
-        # determine what splits (train, dev, test) to evaluate and log
-        log_train = True if monitor_train else False
-        log_test = (
-            True
-            if (not param_selection_mode and self.corpus.test and monitor_test)
-            else False
-        )
-        log_dev = True if not train_with_dev else False
-        log_train_part = (
-            True
-            if (eval_on_train_fraction == "dev" or eval_on_train_fraction > 0.0)
-            else False
+        (
+            log_dev,
+            log_handler,
+            log_test,
+            log_train,
+            log_train_part,
+            loss_txt,
+            train_part,
+            train_part_size,
+            writer,
+        ) = self._prepare_logging(
+            anneal_factor,
+            base_path,
+            batch_growth_annealing,
+            embeddings_storage_mode,
+            eval_on_train_fraction,
+            eval_on_train_shuffle,
+            learning_rate,
+            max_epochs,
+            mini_batch_size,
+            monitor_test,
+            monitor_train,
+            param_selection_mode,
+            patience,
+            shuffle,
+            train_with_dev,
         )
 
-        if log_train_part:
-            train_part_size = (
-                len(self.corpus.dev)
-                if eval_on_train_fraction == "dev"
-                else int(len(self.corpus.train) * eval_on_train_fraction)
-            )
-            assert train_part_size > 0
-            if not eval_on_train_shuffle:
-                train_part_indices = list(range(train_part_size))
-                train_part = torch.utils.data.dataset.Subset(
-                    self.corpus.train, train_part_indices
-                )
+        weight_extractor = WeightExtractor(
+            base_path
+        )  # TODO(tilo): this is some sort of logging?
 
-        # prepare loss logging file and set up header
-        loss_txt = init_output_file(base_path, "loss.tsv")
-
-        weight_extractor = WeightExtractor(base_path)
-
-        optimizer: torch.optim.Optimizer = self.optimizer(
-            self.model.parameters(), lr=learning_rate, **kwargs
+        optimizer = self._prepare_optimizer(
+            amp_opt_level, kwargs, learning_rate, use_amp
         )
-
-        if use_amp:
-            self.model, optimizer = amp.initialize(
-                self.model, optimizer, opt_level=amp_opt_level
-            )
 
         # minimize training loss if training with dev data, else maximize dev score
         anneal_mode = "min" if train_with_dev else "max"
@@ -234,20 +183,9 @@ class ModelTrainer:
             verbose=True,
         )
 
-        train_data = self.corpus.train
-
-        # if training also uses dev data, include in training set
-        if train_with_dev:
-            train_data = ConcatDataset([self.corpus.train, self.corpus.dev])
-
-        # initialize sampler if provided
-        if sampler is not None:
-            # init with default values if only class is provided
-            if inspect.isclass(sampler):
-                sampler = sampler()
-            # set dataset to sample from
-            sampler.set_dataset(train_data)
-            shuffle = False
+        sampler, shuffle, train_data = self._prepare_sampler_and_train_data(
+            sampler, shuffle, train_with_dev
+        )
 
         dev_score_history = []
         dev_loss_history = []
@@ -592,6 +530,131 @@ class ModelTrainer:
             "train_loss_history": train_loss_history,
             "dev_loss_history": dev_loss_history,
         }
+
+    def _prepare_sampler_and_train_data(self, sampler, shuffle, train_with_dev):
+        train_data = self.corpus.train
+        # if training also uses dev data, include in training set
+        if train_with_dev:
+            train_data = ConcatDataset([self.corpus.train, self.corpus.dev])
+        # initialize sampler if provided
+        if sampler is not None:
+            # init with default values if only class is provided
+            if inspect.isclass(sampler):
+                sampler = sampler()
+            # set dataset to sample from
+            sampler.set_dataset(train_data)
+            shuffle = False
+        return sampler, shuffle, train_data
+
+    def _prepare_optimizer(self, amp_opt_level, kwargs, learning_rate, use_amp):
+        optimizer: torch.optim.Optimizer = self.optimizer(
+            self.model.parameters(), lr=learning_rate, **kwargs
+        )
+        if use_amp:
+            self.model, optimizer = amp.initialize(
+                self.model, optimizer, opt_level=amp_opt_level
+            )
+        return optimizer
+
+    def _prepare_logging(
+        self,
+        anneal_factor,
+        base_path,
+        batch_growth_annealing,
+        embeddings_storage_mode,
+        eval_on_train_fraction,
+        eval_on_train_shuffle,
+        learning_rate,
+        max_epochs,
+        mini_batch_size,
+        monitor_test,
+        monitor_train,
+        param_selection_mode,
+        patience,
+        shuffle,
+        train_with_dev,
+    ):
+        if self.use_tensorboard:
+            try:
+                from torch.utils.tensorboard import SummaryWriter
+
+                writer = SummaryWriter()
+            except:
+                log_line(log)
+                log.warning(
+                    "ATTENTION! PyTorch >= 1.1.0 and pillow are required for TensorBoard support!"
+                )
+                log_line(log)
+                self.use_tensorboard = False
+                pass
+        log_handler = add_file_handler(log, base_path / "training.log")
+        log_line(log)
+        log.info(f'Model: "{self.model}"')
+        log_line(log)
+        log.info(f'Corpus: "{self.corpus}"')
+        log_line(log)
+        log.info("Parameters:")
+        log.info(f' - learning_rate: "{learning_rate}"')
+        log.info(f' - mini_batch_size: "{mini_batch_size}"')
+        log.info(f' - patience: "{patience}"')
+        log.info(f' - anneal_factor: "{anneal_factor}"')
+        log.info(f' - max_epochs: "{max_epochs}"')
+        log.info(f' - shuffle: "{shuffle}"')
+        log.info(f' - train_with_dev: "{train_with_dev}"')
+        log.info(f' - batch_growth_annealing: "{batch_growth_annealing}"')
+        log_line(log)
+        log.info(f'Model training base path: "{base_path}"')
+        log_line(log)
+        log.info(f"Device: {flair.device}")
+        log_line(log)
+        log.info(f"Embeddings storage mode: {embeddings_storage_mode}")
+        if (
+            isinstance(self.model, SequenceTagger)
+            and self.model.weight_dict
+            and self.model.use_crf
+        ):
+            log_line(log)
+            log.warning(
+                f"WARNING: Specified class weights will not take effect when using CRF"
+            )
+        # determine what splits (train, dev, test) to evaluate and log
+        log_train = True if monitor_train else False
+        log_test = (
+            True
+            if (not param_selection_mode and self.corpus.test and monitor_test)
+            else False
+        )
+        log_dev = True if not train_with_dev else False
+        log_train_part = (
+            True
+            if (eval_on_train_fraction == "dev" or eval_on_train_fraction > 0.0)
+            else False
+        )
+        if log_train_part:
+            train_part_size = (
+                len(self.corpus.dev)
+                if eval_on_train_fraction == "dev"
+                else int(len(self.corpus.train) * eval_on_train_fraction)
+            )
+            assert train_part_size > 0
+            if not eval_on_train_shuffle:
+                train_part_indices = list(range(train_part_size))
+                train_part = torch.utils.data.dataset.Subset(
+                    self.corpus.train, train_part_indices
+                )
+        # prepare loss logging file and set up header
+        loss_txt = init_output_file(base_path, "loss.tsv")
+        return (
+            log_dev,
+            log_handler,
+            log_test,
+            log_train,
+            log_train_part,
+            loss_txt,
+            train_part,
+            train_part_size,
+            writer,
+        )
 
     def save_checkpoint(self, model_file: Union[str, Path]):
         corpus = self.corpus
