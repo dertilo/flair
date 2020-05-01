@@ -247,25 +247,7 @@ class ModelTrainer:
                 for batch_no, batch in enumerate(batch_loader):
                     start_time = time.time()
 
-                    # zero the gradients on the model and optimizer
-                    self.model.zero_grad()
-                    optimizer.zero_grad()
-
-                    # if necessary, make batch_steps
-                    batch_steps = [batch]
-                    if len(batch) > micro_batch_size:
-                        batch_steps = [
-                            batch[x : x + micro_batch_size]
-                            for x in range(0, len(batch), micro_batch_size)
-                        ]
-
-                    loss = self._forward_and_backward_for_batch(
-                        batch_steps, optimizer, use_amp
-                    )
-
-                    # do the optimizer step
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
-                    optimizer.step()
+                    loss = self._train_step(batch, micro_batch_size, optimizer, use_amp)
 
                     seen_batches += 1
                     train_loss += loss.item()
@@ -503,18 +485,36 @@ class ModelTrainer:
             "dev_loss_history": dev_loss_history,
         }
 
-    def _forward_and_backward_for_batch(self, batch_steps, optimizer, use_amp):
-        for batch_step in batch_steps:
+    def _train_step(self, batch, micro_batch_size, optimizer, use_amp):
+        def _forward_and_backward_for_batch(batch_steps, optimizer, use_amp):
+            assert len(batch_steps) > 0
+            for batch_step in batch_steps:
 
-            # forward pass
-            loss = self.model.forward_loss(batch_step)
+                # forward pass
+                loss = self.model.forward_loss(batch_step)
 
-            # Backward
-            if use_amp:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
+                # Backward
+                if use_amp:
+                    with amp.scale_loss(loss, optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                else:
+                    loss.backward()
+            return loss
+
+        # zero the gradients on the model and optimizer
+        self.model.zero_grad()
+        optimizer.zero_grad()
+        # if necessary, make batch_steps
+        batch_steps = [batch]
+        if len(batch) > micro_batch_size:
+            batch_steps = [
+                batch[x : x + micro_batch_size]
+                for x in range(0, len(batch), micro_batch_size)
+            ]
+        loss = _forward_and_backward_for_batch(batch_steps, optimizer, use_amp)
+        # do the optimizer step
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
+        optimizer.step()
         return loss
 
     def _get_new_learning_rate(self, optimizer, old_learning_rate=None):
