@@ -140,8 +140,6 @@ class ModelTrainer:
             log_flags,
             log_handler,
             loss_txt,
-            train_part,
-            train_part_size,
             writer,
         ) = self._prepare_logging(
             anneal_factor,
@@ -149,7 +147,6 @@ class ModelTrainer:
             batch_growth_annealing,
             embeddings_storage_mode,
             eval_on_train_fraction,
-            eval_on_train_shuffle,
             learning_rate,
             max_epochs,
             mini_batch_size,
@@ -159,6 +156,9 @@ class ModelTrainer:
             patience,
             shuffle,
             train_with_dev,
+        )
+        train_part, train_part_size = self._prepare_train_part(
+            eval_on_train_fraction, eval_on_train_shuffle, log_flags
         )
 
         weight_extractor = WeightExtractor(
@@ -528,6 +528,24 @@ class ModelTrainer:
             "dev_loss_history": dev_loss_history,
         }
 
+    def _prepare_train_part(
+        self, eval_on_train_fraction, eval_on_train_shuffle, log_flags
+    ):
+        train_part, train_part_size = None, None
+        if log_flags.log_train_part:
+            train_part_size = (
+                len(self.corpus.dev)
+                if eval_on_train_fraction == "dev"
+                else int(len(self.corpus.train) * eval_on_train_fraction)
+            )
+            assert train_part_size > 0
+            if not eval_on_train_shuffle:
+                train_part_indices = list(range(train_part_size))
+                train_part = torch.utils.data.dataset.Subset(
+                    self.corpus.train, train_part_indices
+                )
+        return train_part, train_part_size
+
     def _prepare_sampler_and_train_data(self, sampler, shuffle, train_with_dev):
         train_data = self.corpus.train
         # if training also uses dev data, include in training set
@@ -560,7 +578,6 @@ class ModelTrainer:
         batch_growth_annealing,
         embeddings_storage_mode,
         eval_on_train_fraction,
-        eval_on_train_shuffle,
         learning_rate,
         max_epochs,
         mini_batch_size,
@@ -623,27 +640,13 @@ class ModelTrainer:
             param_selection_mode,
             train_with_dev,
         )
-        train_part, train_part_size = None, None
-        if log_flags.log_train_part:
-            train_part_size = (
-                len(self.corpus.dev)
-                if eval_on_train_fraction == "dev"
-                else int(len(self.corpus.train) * eval_on_train_fraction)
-            )
-            assert train_part_size > 0
-            if not eval_on_train_shuffle:
-                train_part_indices = list(range(train_part_size))
-                train_part = torch.utils.data.dataset.Subset(
-                    self.corpus.train, train_part_indices
-                )
+
         # prepare loss logging file and set up header
         loss_txt = init_output_file(base_path, "loss.tsv")
         return (
             log_flags,
             log_handler,
             loss_txt,
-            train_part,
-            train_part_size,
             writer,
         )
 
