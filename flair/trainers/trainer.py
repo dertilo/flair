@@ -571,6 +571,7 @@ class ModelTrainer:
         shuffle,
         train_with_dev,
     ):
+        writer = None
         if self.use_tensorboard:
             try:
                 from torch.utils.tensorboard import SummaryWriter
@@ -622,6 +623,7 @@ class ModelTrainer:
             param_selection_mode,
             train_with_dev,
         )
+        train_part, train_part_size = None, None
         if log_flags.log_train_part:
             train_part_size = (
                 len(self.corpus.dev)
