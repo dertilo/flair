@@ -235,40 +235,16 @@ class ModelTrainer:
 
                 self.model.train()
 
-                train_loss: float = 0
-
-                seen_batches = 0
-                total_number_of_batches = len(batch_loader)
-
-                modulo = max(1, int(total_number_of_batches / 10))
-
-                # process mini-batches
-                batch_time = 0
-                for batch_no, batch in enumerate(batch_loader):
-                    start_time = time.time()
-
-                    loss = self._train_step(batch, micro_batch_size, optimizer, use_amp)
-
-                    seen_batches += 1
-                    train_loss += loss.item()
-
-                    # depending on memory mode, embeddings are moved to CPU, GPU or deleted
-                    store_embeddings(batch, embeddings_storage_mode)
-
-                    batch_time += time.time() - start_time
-                    if seen_batches % modulo == 0:
-                        log.info(
-                            f"epoch {self.epoch} - iter {seen_batches}/{total_number_of_batches} - loss "
-                            f"{train_loss / seen_batches:.8f} - samples/sec: {mini_batch_size * modulo / batch_time:.2f}"
-                        )
-                        batch_time = 0
-                        iteration = self.epoch * total_number_of_batches + batch_no
-                        if not param_selection_mode:
-                            weight_extractor.extract_weights(
-                                self.model.state_dict(), iteration
-                            )
-
-                train_loss /= seen_batches
+                train_loss = self._run_training(
+                    batch_loader,
+                    embeddings_storage_mode,
+                    micro_batch_size,
+                    mini_batch_size,
+                    optimizer,
+                    param_selection_mode,
+                    use_amp,
+                    weight_extractor,
+                )
 
                 self.model.eval()
 
@@ -484,6 +460,47 @@ class ModelTrainer:
             "train_loss_history": train_loss_history,
             "dev_loss_history": dev_loss_history,
         }
+
+    def _run_training(
+        self,
+        batch_loader,
+        embeddings_storage_mode,
+        micro_batch_size,
+        mini_batch_size,
+        optimizer,
+        param_selection_mode,
+        use_amp,
+        weight_extractor,
+    ):
+        train_loss: float = 0
+        seen_batches = 0
+        total_number_of_batches = len(batch_loader)
+        modulo = max(1, int(total_number_of_batches / 10))
+        # process mini-batches
+        batch_time = 0
+        for batch_no, batch in enumerate(batch_loader):
+            start_time = time.time()
+
+            loss = self._train_step(batch, micro_batch_size, optimizer, use_amp)
+
+            seen_batches += 1
+            train_loss += loss.item()
+
+            # depending on memory mode, embeddings are moved to CPU, GPU or deleted
+            store_embeddings(batch, embeddings_storage_mode)
+
+            batch_time += time.time() - start_time
+            if seen_batches % modulo == 0:
+                log.info(
+                    f"epoch {self.epoch} - iter {seen_batches}/{total_number_of_batches} - loss "
+                    f"{train_loss / seen_batches:.8f} - samples/sec: {mini_batch_size * modulo / batch_time:.2f}"
+                )
+                batch_time = 0
+                iteration = self.epoch * total_number_of_batches + batch_no
+                if not param_selection_mode:
+                    weight_extractor.extract_weights(self.model.state_dict(), iteration)
+        train_loss /= seen_batches
+        return train_loss
 
     def _train_step(self, batch, micro_batch_size, optimizer, use_amp):
         def _forward_and_backward_for_batch(batch_steps, optimizer, use_amp):
