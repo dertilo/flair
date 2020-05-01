@@ -204,8 +204,7 @@ class ModelTrainer:
                     )
 
                 # get new learning rate
-                for group in optimizer.param_groups:
-                    learning_rate = group["lr"]
+                learning_rate = self._get_new_learning_rate(optimizer, learning_rate)
 
                 lr_has_changed = learning_rate != previous_learning_rate
                 if lr_has_changed and batch_growth_annealing:
@@ -408,8 +407,8 @@ class ModelTrainer:
                     bad_epochs = scheduler.num_bad_epochs
                 except:
                     bad_epochs = 0
-                for group in optimizer.param_groups:
-                    new_learning_rate = group["lr"]
+
+                new_learning_rate = self._get_new_learning_rate(optimizer)
                 if new_learning_rate != previous_learning_rate:
                     bad_epochs = patience + 1
 
@@ -513,6 +512,13 @@ class ModelTrainer:
             "train_loss_history": train_loss_history,
             "dev_loss_history": dev_loss_history,
         }
+
+    def _get_new_learning_rate(self, optimizer, old_learning_rate=None):
+        learning_rate = old_learning_rate
+        for group in optimizer.param_groups:
+            learning_rate = group["lr"]
+        assert learning_rate is not None
+        return learning_rate
 
     def _reload_last_best_model_if_annealing_with_restarts_is_enabled(
         self, anneal_with_prestarts, anneal_with_restarts, base_path, lr_has_changed,
