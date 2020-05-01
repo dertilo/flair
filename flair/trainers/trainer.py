@@ -203,7 +203,6 @@ class ModelTrainer:
                         self.corpus.train, train_part_indices
                     )
 
-                # get new learning rate
                 learning_rate = self._get_new_learning_rate(optimizer, learning_rate)
 
                 lr_has_changed = learning_rate != previous_learning_rate
@@ -260,18 +259,9 @@ class ModelTrainer:
                             for x in range(0, len(batch), micro_batch_size)
                         ]
 
-                    # forward and backward for batch
-                    for batch_step in batch_steps:
-
-                        # forward pass
-                        loss = self.model.forward_loss(batch_step)
-
-                        # Backward
-                        if use_amp:
-                            with amp.scale_loss(loss, optimizer) as scaled_loss:
-                                scaled_loss.backward()
-                        else:
-                            loss.backward()
+                    loss = self._forward_and_backward_for_batch(
+                        batch_steps, optimizer, use_amp
+                    )
 
                     # do the optimizer step
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
@@ -512,6 +502,20 @@ class ModelTrainer:
             "train_loss_history": train_loss_history,
             "dev_loss_history": dev_loss_history,
         }
+
+    def _forward_and_backward_for_batch(self, batch_steps, optimizer, use_amp):
+        for batch_step in batch_steps:
+
+            # forward pass
+            loss = self.model.forward_loss(batch_step)
+
+            # Backward
+            if use_amp:
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+        return loss
 
     def _get_new_learning_rate(self, optimizer, old_learning_rate=None):
         learning_rate = old_learning_rate
