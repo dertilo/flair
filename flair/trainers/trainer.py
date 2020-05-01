@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, NamedTuple
 import time
 import datetime
 import sys
@@ -137,11 +137,8 @@ class ModelTrainer:
             base_path = Path(base_path)
 
         (
-            log_dev,
+            log_flags,
             log_handler,
-            log_test,
-            log_train,
-            log_train_part,
             loss_txt,
             train_part,
             train_part_size,
@@ -332,7 +329,7 @@ class ModelTrainer:
                 # evaluate on train / dev / test split depending on training settings
                 result_line: str = ""
 
-                if log_train:
+                if log_flags.log_train:
                     train_eval_result, train_loss = self.model.evaluate(
                         DataLoader(
                             self.corpus.train,
@@ -346,7 +343,7 @@ class ModelTrainer:
                     # depending on memory mode, embeddings are moved to CPU, GPU or deleted
                     store_embeddings(self.corpus.train, embeddings_storage_mode)
 
-                if log_train_part:
+                if log_flags.log_train_part:
                     train_part_eval_result, train_part_loss = self.model.evaluate(
                         DataLoader(
                             train_part,
@@ -362,7 +359,7 @@ class ModelTrainer:
                         f"TRAIN_SPLIT : loss {train_part_loss} - score {round(train_part_eval_result.main_score, 4)}"
                     )
 
-                if log_dev:
+                if log_flags.log_dev:
                     dev_eval_result, dev_loss = self.model.evaluate(
                         DataLoader(
                             self.corpus.dev,
@@ -391,7 +388,7 @@ class ModelTrainer:
                             "dev_score", dev_eval_result.main_score, self.epoch
                         )
 
-                if log_test:
+                if log_flags.log_test:
                     test_eval_result, test_loss = self.model.evaluate(
                         DataLoader(
                             self.corpus.test,
@@ -442,26 +439,26 @@ class ModelTrainer:
                             f"EPOCH\tTIMESTAMP\tBAD_EPOCHS\tLEARNING_RATE\tTRAIN_LOSS"
                         )
 
-                        if log_train:
+                        if log_flags.log_train:
                             f.write(
                                 "\tTRAIN_"
                                 + "\tTRAIN_".join(
                                     train_eval_result.log_header.split("\t")
                                 )
                             )
-                        if log_train_part:
+                        if log_flags.log_train_part:
                             f.write(
                                 "\tTRAIN_PART_LOSS\tTRAIN_PART_"
                                 + "\tTRAIN_PART_".join(
                                     train_part_eval_result.log_header.split("\t")
                                 )
                             )
-                        if log_dev:
+                        if log_flags.log_dev:
                             f.write(
                                 "\tDEV_LOSS\tDEV_"
                                 + "\tDEV_".join(dev_eval_result.log_header.split("\t"))
                             )
-                        if log_test:
+                        if log_flags.log_test:
                             f.write(
                                 "\tTEST_LOSS\tTEST_"
                                 + "\tTEST_".join(
@@ -618,19 +615,14 @@ class ModelTrainer:
                 f"WARNING: Specified class weights will not take effect when using CRF"
             )
         # determine what splits (train, dev, test) to evaluate and log
-        log_train = True if monitor_train else False
-        log_test = (
-            True
-            if (not param_selection_mode and self.corpus.test and monitor_test)
-            else False
+        log_flags = self._build_log_flags(
+            eval_on_train_fraction,
+            monitor_test,
+            monitor_train,
+            param_selection_mode,
+            train_with_dev,
         )
-        log_dev = True if not train_with_dev else False
-        log_train_part = (
-            True
-            if (eval_on_train_fraction == "dev" or eval_on_train_fraction > 0.0)
-            else False
-        )
-        if log_train_part:
+        if log_flags.log_train_part:
             train_part_size = (
                 len(self.corpus.dev)
                 if eval_on_train_fraction == "dev"
@@ -645,16 +637,41 @@ class ModelTrainer:
         # prepare loss logging file and set up header
         loss_txt = init_output_file(base_path, "loss.tsv")
         return (
-            log_dev,
+            log_flags,
             log_handler,
-            log_test,
-            log_train,
-            log_train_part,
             loss_txt,
             train_part,
             train_part_size,
             writer,
         )
+
+    class LogFlags(NamedTuple):
+        log_train: bool
+        log_dev: bool
+        log_test: bool
+        log_train_part: bool
+
+    def _build_log_flags(
+        self,
+        eval_on_train_fraction,
+        monitor_test,
+        monitor_train,
+        param_selection_mode,
+        train_with_dev,
+    ):
+        log_train = True if monitor_train else False
+        log_test = (
+            True
+            if (not param_selection_mode and self.corpus.test and monitor_test)
+            else False
+        )
+        log_dev = True if not train_with_dev else False
+        log_train_part = (
+            True
+            if (eval_on_train_fraction == "dev" or eval_on_train_fraction > 0.0)
+            else False
+        )
+        return self.LogFlags(log_dev, log_test, log_train, log_train_part)
 
     def save_checkpoint(self, model_file: Union[str, Path]):
         corpus = self.corpus
