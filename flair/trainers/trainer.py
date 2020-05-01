@@ -136,12 +136,7 @@ class ModelTrainer:
         if type(base_path) is str:
             base_path = Path(base_path)
 
-        (
-            log_flags,
-            log_handler,
-            loss_txt,
-            writer,
-        ) = self._prepare_logging(
+        (log_flags, log_handler, loss_txt, writer,) = self._prepare_logging(
             anneal_factor,
             base_path,
             batch_growth_annealing,
@@ -215,22 +210,13 @@ class ModelTrainer:
                 if learning_rate != previous_learning_rate and batch_growth_annealing:
                     mini_batch_size *= 2
 
-                # reload last best model if annealing with restarts is enabled
-                if (
-                    learning_rate != previous_learning_rate
-                    and (base_path / "best-model.pt").exists()
-                ):
-                    log.info("resetting to best model")
-                    if anneal_with_restarts:
-                        self.model.load_state_dict(
-                            self.model.load(base_path / "best-model.pt").state_dict()
-                        )
-                    if anneal_with_prestarts:
-                        self.model.load_state_dict(
-                            self.model.load(
-                                base_path / "pre-best-model.pt"
-                            ).state_dict()
-                        )
+                self._reload_last_best_model_if_annealing_with_restarts_is_enabled(
+                    anneal_with_prestarts,
+                    anneal_with_restarts,
+                    base_path,
+                    learning_rate,
+                    previous_learning_rate,
+                )
 
                 previous_learning_rate = learning_rate
 
@@ -527,6 +513,28 @@ class ModelTrainer:
             "train_loss_history": train_loss_history,
             "dev_loss_history": dev_loss_history,
         }
+
+    def _reload_last_best_model_if_annealing_with_restarts_is_enabled(
+        self,
+        anneal_with_prestarts,
+        anneal_with_restarts,
+        base_path,
+        learning_rate,
+        previous_learning_rate,
+    ):
+        if (
+            learning_rate != previous_learning_rate
+            and (base_path / "best-model.pt").exists()
+        ):
+            log.info("resetting to best model")
+            if anneal_with_restarts:
+                self.model.load_state_dict(
+                    self.model.load(base_path / "best-model.pt").state_dict()
+                )
+            if anneal_with_prestarts:
+                self.model.load_state_dict(
+                    self.model.load(base_path / "pre-best-model.pt").state_dict()
+                )
 
     def _prepare_train_part(
         self, eval_on_train_fraction, eval_on_train_shuffle, log_flags
